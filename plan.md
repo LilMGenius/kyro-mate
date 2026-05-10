@@ -1,14 +1,14 @@
-# KYRO Pace Buddy
+# KYRO Mate
 
 ## One-liner
 
-KYRO Pace Buddy는 친구 러닝 데이터를 Tinder처럼 넘기며, 같이 뛰기 좋은 러닝 친구와 선의의 라이벌을 찾아주는 건전한 러닝 버디 매칭 앱이다.
+KYRO Mate는 친구 러닝 데이터를 Tinder처럼 넘기며, 같이 뛰기 좋은 러닝 친구와 선의의 라이벌을 찾아주는 건전한 러닝 버디 매칭 앱이다.
 
 ## Repository
 
-- GitHub: https://github.com/LilMGenius/kyro-pace-buddy
+- GitHub: https://github.com/LilMGenius/kyro-mate
 - Visibility: Public
-- App name: KYRO Pace Buddy
+- App name: KYRO Mate
 
 ## Why This Wins
 
@@ -58,7 +58,7 @@ KYRO의 핵심은 러닝을 혼자 하는 기록 앱이 아니라 영토, 크루
 Base URL:
 
 ```text
-https://kyro-hackathon-mcp.vercel.app
+https://kyro-hackathon.vercel.app
 ```
 
 Endpoints:
