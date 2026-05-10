@@ -25,6 +25,54 @@ const scorePartLabels = {
   vibe: '무드',
 };
 
+const timeSlotLabels = {
+  morning: '아침 러닝',
+  afternoon: '낮 러닝',
+  evening: '저녁 러닝',
+  night: '밤 러닝',
+};
+
+const demoNames = [
+  '하린', '서윤', '민서', '지우', '나은', '유나', '채원', '다인',
+  '소윤', '예린', '수아', '라희', '지민', '연우', '하율', '도아',
+  '세아', '아린', '로아', '은서', '하영', '유주', '서하', '리아',
+];
+
+const demoVibes = [
+  ['복숭아 페이스런', '웃으면서 5K를 채우는 산뜻한 러너예요.', 'morning', 5.2, 345],
+  ['한강 수다런', '기록보다 대화와 풍경을 더 좋아해요.', 'evening', 6.1, 372],
+  ['민트 템포런', '마지막 1km는 살짝 승부욕이 올라와요.', 'night', 4.8, 318],
+  ['크림 조깅', '가볍게 몸 풀고 카페로 마무리하는 코스가 좋아요.', 'afternoon', 3.4, 405],
+  ['리본 롱런', '페이스를 일정하게 잡아주는 든든한 타입이에요.', 'morning', 9.7, 356],
+  ['핑크 업힐런', '언덕도 귀엽게 이겨내는 파워 러너예요.', 'evening', 7.3, 332],
+];
+
+function buildDemoCandidates(baseRun) {
+  const city = baseRun?.city ?? '서울';
+  const areas = [baseRun?.area, '한강공원', '석촌호수', '서울숲', '올림픽공원', '양재천'].filter(Boolean);
+
+  return demoNames.map((name, index) => {
+    const [title, note, timeSlot, distanceKm, paceSecPerKm] = demoVibes[index % demoVibes.length];
+    return {
+      id: `demo-friend-${index + 1}`,
+      name,
+      title,
+      distanceKm: distanceKm + (index % 4) * 0.3,
+      paceSecPerKm: paceSecPerKm + (index % 5) * 6,
+      city,
+      area: areas[index % areas.length],
+      timeSlot,
+      tag: '데모 후보',
+      note,
+      elevationGainM: 12 + (index % 6) * 4,
+      territoryGainM2: 900 + index * 75,
+      splitsCount: 3 + (index % 5),
+      trackPointCount: 18 + index,
+      synthetic: true,
+    };
+  });
+}
+
 function parseNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : undefined;
@@ -73,18 +121,21 @@ function normalizeRun(run, index, kind) {
   const location = run.location ?? run.place ?? {};
   const user = run.user ?? run.friend ?? run.owner ?? {};
   const distanceKm = parseDistanceKm(run);
+  const city = run.city ?? location.city ?? run.region ?? run.place_region_label ?? 'KYRO';
+  const area = run.area ?? location.area ?? location.name ?? run.route_name ?? run.place_display_label ?? run.place_region_label ?? run.city ?? 'Route';
+  const fallbackName = kind === 'friend' ? `${area === 'Route' ? city : area} 러너 ${index + 1}` : `내 러닝 ${index + 1}`;
   const paceSecPerKm = parsePaceSeconds(
     run.paceSecPerKm ?? run.average_pace_sec_per_km ?? run.avg_pace_s_km ?? run.avg_pace ?? run.pace,
   ) ?? (distanceKm && run.duration_s ? Number(run.duration_s) / distanceKm : undefined);
 
   return {
     id: String(run.id ?? run.run_id ?? `${kind}-${index}`),
-    name: run.name ?? user.name ?? run.friendName ?? run.friend_name ?? `${kind === 'friend' ? 'KYRO 러너' : '내 러닝'} ${index + 1}`,
+    name: run.name ?? user.name ?? run.friendName ?? run.friend_name ?? fallbackName,
     title: run.title ?? run.name ?? run.activityName ?? run.activity_name ?? `KYRO 러닝 ${index + 1}`,
     distanceKm,
     paceSecPerKm,
-    city: run.city ?? location.city ?? run.region ?? run.place_region_label ?? 'KYRO',
-    area: run.area ?? location.area ?? location.name ?? run.route_name ?? run.place_display_label ?? run.place_region_label ?? run.city ?? 'Route',
+    city,
+    area,
     timeSlot: parseTimeSlot(run),
     tag: run.tag ?? run.vibe ?? run.type ?? '읽기 전용 API 러닝',
     note: run.note ?? run.description ?? run.memo ?? 'KYRO API에서 불러온 실제 러닝 데이터',
@@ -165,14 +216,30 @@ export default function App() {
   }, []);
 
   const selectedRun = runs.myRuns.find((run) => run.id === selectedRunId) ?? runs.myRuns[0];
-  const activeFriend = runs.friendRuns.length ? runs.friendRuns[cardIndex % runs.friendRuns.length] : null;
-  const nextFriend = runs.friendRuns.length ? runs.friendRuns[(cardIndex + 1) % runs.friendRuns.length] : null;
+  const candidateRuns = useMemo(() => {
+    const seen = new Set();
+    const candidates = [];
+    const addCandidate = (run) => {
+      if (!run || run.id === selectedRun?.id || seen.has(run.id)) return;
+      seen.add(run.id);
+      candidates.push(run);
+    };
+
+    runs.friendRuns.forEach(addCandidate);
+    runs.myRuns.forEach(addCandidate);
+    if (selectedRun && candidates.length < 2) {
+      buildDemoCandidates(selectedRun).forEach(addCandidate);
+    }
+    return candidates;
+  }, [runs.friendRuns, runs.myRuns, selectedRun?.id]);
+  const activeFriend = candidateRuns.length ? candidateRuns[cardIndex % candidateRuns.length] : null;
+  const nextFriend = candidateRuns.length > 1 ? candidateRuns[(cardIndex + 1) % candidateRuns.length] : null;
   const selectedRunWithDetail = selectedRun ? details[selectedRun.id] ?? selectedRun : null;
   const activeFriendWithDetail = activeFriend ? details[activeFriend.id] ?? activeFriend : null;
   const resultFriend = decision.friend ? details[decision.friend.id] ?? decision.friend : activeFriendWithDetail;
 
   useEffect(() => {
-    const targets = [selectedRun, activeFriend].filter((run) => run && !details[run.id]);
+    const targets = [selectedRun, activeFriend].filter((run) => run && !run.synthetic && !details[run.id]);
     if (!targets.length) return;
 
     let cancelled = false;
@@ -196,22 +263,30 @@ export default function App() {
     };
   }, [activeFriend, details, selectedRun]);
 
+  useEffect(() => {
+    setCardIndex(0);
+    setDecision({ intent: ACTIONS.runTogether, friend: null });
+    setActionMessage(candidateRuns.length > 1 ? '오른쪽으로 밀면 같이 뛰기' : '후보 카드를 준비하는 중');
+  }, [candidateRuns.length, selectedRunId]);
+
   const match = useMemo(
     () => (selectedRunWithDetail && resultFriend ? calculateBuddyMatch(selectedRunWithDetail, resultFriend, decision.intent) : null),
     [decision.intent, resultFriend, selectedRunWithDetail],
   );
 
   function choose(nextIntent) {
-    if (!activeFriend) return;
+    if (!activeFriend || candidateRuns.length <= 1) return;
 
     const chosenFriend = activeFriendWithDetail ?? activeFriend;
+    const nextIndex = (cardIndex + 1) % candidateRuns.length;
+    const upcomingFriend = candidateRuns[nextIndex];
     setDrag({ active: false, startX: 0, startY: 0, x: 0, y: 0 });
 
     if (nextIntent === ACTIONS.pass) {
-      setActionMessage(`${chosenFriend.name} 패스 완료`);
+      setActionMessage(`${chosenFriend.name} 패스 완료 · 다음은 ${upcomingFriend.name}`);
     } else {
       setDecision({ intent: nextIntent, friend: chosenFriend });
-      setActionMessage(nextIntent === ACTIONS.rival ? `${chosenFriend.name} 라이벌 찜` : `${chosenFriend.name} 매칭 찜`);
+      setActionMessage(nextIntent === ACTIONS.rival ? `${chosenFriend.name} 라이벌 찜 · 다음은 ${upcomingFriend.name}` : `${chosenFriend.name} 매칭 찜 · 다음은 ${upcomingFriend.name}`);
     }
 
     setCardIndex((index) => index + 1);
@@ -242,7 +317,7 @@ export default function App() {
   }
 
   const isReady = status === 'live' && selectedRunWithDetail && activeFriendWithDetail && match;
-  const canChoose = Boolean(activeFriend);
+  const canChoose = Boolean(activeFriend && candidateRuns.length > 1);
 
   return (
     <main className="app-shell">
@@ -295,9 +370,10 @@ export default function App() {
               <small>{detailStatus === 'loading' ? '궁합 계산 중' : actionMessage}</small>
             </div>
             <div className="card-stack">
-              {nextFriend && <FriendCard friend={nextFriend} ghost />}
+              {nextFriend && <FriendCard key={`next-${nextFriend.id}-${cardIndex}`} friend={nextFriend} ghost />}
               {activeFriendWithDetail && (
                 <FriendCard
+                  key={`active-${activeFriendWithDetail.id}-${cardIndex}`}
                   friend={activeFriendWithDetail}
                   drag={drag}
                   onPointerDown={beginSwipe}
@@ -382,7 +458,7 @@ function FriendCard({ friend, ghost = false, drag, ...handlers }) {
       )}
       <div className="card-topline">
         <span>{friend.name}</span>
-        <small>{friend.timeSlot ?? '시간대 준비중'}</small>
+        <small>{timeSlotLabels[friend.timeSlot] ?? '시간대 준비중'}</small>
       </div>
       <h3>{friend.title}</h3>
       <div className="stats">
