@@ -38,6 +38,15 @@ function parseTimeSlot(run) {
   return 'night';
 }
 
+function getTrackPointCount(trackGeojson) {
+  if (!trackGeojson?.coordinates) return 0;
+  if (trackGeojson.type === 'LineString') return trackGeojson.coordinates.length;
+  if (trackGeojson.type === 'MultiLineString') {
+    return trackGeojson.coordinates.reduce((sum, line) => sum + line.length, 0);
+  }
+  return 0;
+}
+
 function normalizeRun(run, index, kind) {
   const location = run.location ?? run.place ?? {};
   const user = run.user ?? run.friend ?? run.owner ?? {};
@@ -57,6 +66,12 @@ function normalizeRun(run, index, kind) {
     timeSlot: parseTimeSlot(run),
     tag: run.tag ?? run.vibe ?? run.type ?? 'read-only API run',
     note: run.note ?? run.description ?? run.memo ?? 'KYRO API에서 불러온 실제 러닝 데이터',
+    calories: parseNumber(run.calories),
+    elevationGainM: parseNumber(run.elevation_gain_m ?? run.elevationGainM),
+    elevationLossM: parseNumber(run.elevation_loss_m ?? run.elevationLossM),
+    territoryGainM2: parseNumber(run.net_territory_gain_m2 ?? run.area_m2),
+    splitsCount: Array.isArray(run.splits) ? run.splits.length : 0,
+    trackPointCount: getTrackPointCount(run.track_geojson),
   };
 }
 
@@ -88,9 +103,18 @@ async function fetchKyroData() {
   };
 }
 
+async function fetchRunDetail(run) {
+  const response = await fetch(`/api/kyro/runs/${run.id}`);
+  if (!response.ok) throw new Error('러닝 상세 API 응답 실패');
+  const detail = await response.json();
+  return normalizeRun({ ...run, ...detail }, 0, 'detail');
+}
+
 export default function App() {
   const [runs, setRuns] = useState(emptyRuns);
+  const [details, setDetails] = useState({});
   const [status, setStatus] = useState('loading');
+  const [detailStatus, setDetailStatus] = useState('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [selectedRunId, setSelectedRunId] = useState('');
   const [cardIndex, setCardIndex] = useState(0);
@@ -120,9 +144,37 @@ export default function App() {
   const selectedRun = runs.myRuns.find((run) => run.id === selectedRunId) ?? runs.myRuns[0];
   const activeFriend = runs.friendRuns.length ? runs.friendRuns[cardIndex % runs.friendRuns.length] : null;
   const nextFriend = runs.friendRuns.length ? runs.friendRuns[(cardIndex + 1) % runs.friendRuns.length] : null;
+  const selectedRunWithDetail = selectedRun ? details[selectedRun.id] ?? selectedRun : null;
+  const activeFriendWithDetail = activeFriend ? details[activeFriend.id] ?? activeFriend : null;
+
+  useEffect(() => {
+    const targets = [selectedRun, activeFriend].filter((run) => run && !details[run.id]);
+    if (!targets.length) return;
+
+    let cancelled = false;
+    setDetailStatus('loading');
+    Promise.allSettled(targets.map(fetchRunDetail)).then((results) => {
+      if (cancelled) return;
+      setDetails((current) => {
+        const next = { ...current };
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            next[targets[index].id] = result.value;
+          }
+        });
+        return next;
+      });
+      setDetailStatus(results.some((result) => result.status === 'fulfilled') ? 'live' : 'error');
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFriend, details, selectedRun]);
+
   const match = useMemo(
-    () => (selectedRun && activeFriend ? calculateBuddyMatch(selectedRun, activeFriend, intent) : null),
-    [activeFriend, intent, selectedRun],
+    () => (selectedRunWithDetail && activeFriendWithDetail ? calculateBuddyMatch(selectedRunWithDetail, activeFriendWithDetail, intent) : null),
+    [activeFriendWithDetail, intent, selectedRunWithDetail],
   );
 
   function choose(nextIntent) {
@@ -136,7 +188,7 @@ export default function App() {
     setLastSkipped(null);
   }
 
-  const isReady = status === 'live' && selectedRun && activeFriend && match;
+  const isReady = status === 'live' && selectedRunWithDetail && activeFriendWithDetail && match;
 
   return (
     <main className="app-shell">
@@ -181,8 +233,9 @@ export default function App() {
               </button>
             ))}
           </div>
+          {selectedRunWithDetail && <RunDetail run={selectedRunWithDetail} label="Selected detail" />}
           <div className="mini-note">
-            실제 KYRO API 데이터만 사용 · API key는 서버/proxy에서만 처리
+            실제 KYRO API 데이터만 사용 · 상세 {detailStatus === 'loading' ? '동기화 중' : detailStatus === 'live' ? '반영됨' : '대기'}
           </div>
         </aside>
 
@@ -191,7 +244,7 @@ export default function App() {
           <h2>친구 러닝 카드</h2>
           <div className="card-stack">
             {nextFriend && <FriendCard friend={nextFriend} ghost />}
-            {activeFriend && <FriendCard friend={activeFriend} />}
+            {activeFriendWithDetail && <FriendCard friend={activeFriendWithDetail} />}
           </div>
           <div className="actions">
             <button onClick={() => choose('Not My Pace')}>Not My Pace</button>
@@ -210,6 +263,7 @@ export default function App() {
           <h2>{match?.headline ?? '실제 러닝 데이터가 오면 바로 계산합니다.'}</h2>
           <p>추천 러닝: {match?.recommendation ?? '--'}</p>
           <p>주의: {match?.warning ?? '--'}</p>
+          {activeFriendWithDetail && <RunDetail run={activeFriendWithDetail} label="Friend detail" />}
           <div className="score-bars">
             {Object.entries(match?.parts ?? {}).map(([key, value]) => (
               <div key={key}>
@@ -221,6 +275,17 @@ export default function App() {
         </section>
       </section>
     </main>
+  );
+}
+
+function RunDetail({ run, label }) {
+  return (
+    <div className="detail-strip" aria-label={label}>
+      <span>{run.splitsCount || '--'} splits</span>
+      <span>{run.trackPointCount || '--'} GPS pts</span>
+      <span>{Number.isFinite(run.elevationGainM) ? `+${Math.round(run.elevationGainM)}m` : '-- elev'}</span>
+      <span>{Number.isFinite(run.territoryGainM2) ? `${Math.round(run.territoryGainM2)}m²` : '-- territory'}</span>
+    </div>
   );
 }
 
@@ -237,6 +302,7 @@ function FriendCard({ friend, ghost = false }) {
         <strong>{formatPace(friend.paceSecPerKm)}</strong>
         <strong>{friend.area}</strong>
       </div>
+      <RunDetail run={friend} label={`${friend.name} detail`} />
       <p>{friend.note}</p>
     </article>
   );

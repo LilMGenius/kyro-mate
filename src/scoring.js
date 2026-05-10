@@ -34,8 +34,13 @@ function locationFit(myRun, friendRun) {
 
 function vibeBonus(myRun, friendRun) {
   const combined = `${myRun.note ?? ''} ${friendRun.note ?? ''} ${friendRun.tag ?? ''}`.toLowerCase();
+  const elevationDiff = Math.abs((myRun.elevationGainM ?? 0) - (friendRun.elevationGainM ?? 0));
+  const bothHaveTrace = (myRun.trackPointCount ?? 0) > 0 && (friendRun.trackPointCount ?? 0) > 0;
+
   if (combined.includes('rival') || combined.includes('후반') || combined.includes('마지막')) return 10;
+  if (bothHaveTrace && elevationDiff <= 10) return 10;
   if (combined.includes('recovery') || combined.includes('수다') || combined.includes('coffee')) return 9;
+  if ((myRun.splitsCount ?? 0) > 0 && (friendRun.splitsCount ?? 0) > 0) return 9;
   return 7;
 }
 
