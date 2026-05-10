@@ -10,10 +10,34 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       proxy: {
-        '/api/kyro': {
+        '/api/runs': {
           target: apiBase,
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api\/kyro/, '/api/v1'),
+          rewrite: (path) => path.replace(/^\/api\/runs/, '/api/v1/runs'),
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq) => {
+              if (apiKey) {
+                proxyReq.setHeader('Authorization', `Bearer ${apiKey}`);
+              }
+            });
+          },
+        },
+        '/api/friends-runs': {
+          target: apiBase,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/friends-runs/, '/api/v1/friends/runs'),
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq) => {
+              if (apiKey) {
+                proxyReq.setHeader('Authorization', `Bearer ${apiKey}`);
+              }
+            });
+          },
+        },
+        '/api/run-detail': {
+          target: apiBase,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/run-detail\?id=([^&]+)/, '/api/v1/runs/$1?'),
           configure: (proxy) => {
             proxy.on('proxyReq', (proxyReq) => {
               if (apiKey) {

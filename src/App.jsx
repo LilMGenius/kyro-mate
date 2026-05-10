@@ -82,8 +82,8 @@ function extractList(payload) {
 
 async function fetchKyroData() {
   const [myResponse, friendResponse] = await Promise.all([
-    fetch('/api/kyro/runs?limit=20'),
-    fetch('/api/kyro/friends/runs?limit=50'),
+    fetch('/api/runs?limit=20'),
+    fetch('/api/friends-runs?limit=50'),
   ]);
 
   if (!myResponse.ok || !friendResponse.ok) throw new Error('KYRO API 응답 실패');
@@ -104,7 +104,7 @@ async function fetchKyroData() {
 }
 
 async function fetchRunDetail(run) {
-  const response = await fetch(`/api/kyro/runs/${run.id}`);
+  const response = await fetch(`/api/run-detail?id=${encodeURIComponent(run.id)}`);
   if (!response.ok) throw new Error('러닝 상세 API 응답 실패');
   const detail = await response.json();
   return normalizeRun({ ...run, ...detail }, 0, 'detail');
@@ -211,7 +211,7 @@ export default function App() {
           <h2>{status === 'loading' ? 'KYRO API에서 실제 러닝 데이터를 불러오는 중' : 'KYRO API 연결이 필요합니다'}</h2>
           <p>
             {status === 'loading'
-              ? 'mock 유저 없이 /api/v1/runs 와 /api/v1/friends/runs 응답만 기다립니다.'
+              ? 'mock 유저 없이 KYRO read-only API 응답만 기다립니다.'
               : `${errorMessage || 'API 응답 실패'} · Vercel env의 KYRO_API_KEY와 KYRO_API_BASE_URL을 확인하세요.`}
           </p>
         </section>
