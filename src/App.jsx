@@ -3,6 +3,28 @@ import { calculateBuddyMatch, formatPace } from './scoring.js';
 
 const emptyRuns = { myRuns: [], friendRuns: [] };
 
+const ACTIONS = {
+  runTogether: 'Run Together',
+  rival: 'Rival Buddy',
+  pass: 'Not My Pace',
+};
+
+const matchTypeLabels = {
+  'Perfect Pace Buddy': '완벽한 페이스 메이트',
+  'Rival Buddy': '라이벌 메이트',
+  'Long Run Material': '롱런 메이트',
+  'Recovery Buddy': '회복런 메이트',
+  'Chaos Buddy': '반전 케미 메이트',
+};
+
+const scorePartLabels = {
+  pace: '페이스',
+  distance: '거리',
+  time: '시간대',
+  location: '장소',
+  vibe: '무드',
+};
+
 function parseNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : undefined;
@@ -57,14 +79,14 @@ function normalizeRun(run, index, kind) {
 
   return {
     id: String(run.id ?? run.run_id ?? `${kind}-${index}`),
-    name: run.name ?? user.name ?? run.friendName ?? run.friend_name ?? `${kind === 'friend' ? 'KYRO Runner' : 'My Run'} ${index + 1}`,
-    title: run.title ?? run.name ?? run.activityName ?? run.activity_name ?? `KYRO Run ${index + 1}`,
+    name: run.name ?? user.name ?? run.friendName ?? run.friend_name ?? `${kind === 'friend' ? 'KYRO 러너' : '내 러닝'} ${index + 1}`,
+    title: run.title ?? run.name ?? run.activityName ?? run.activity_name ?? `KYRO 러닝 ${index + 1}`,
     distanceKm,
     paceSecPerKm,
     city: run.city ?? location.city ?? run.region ?? run.place_region_label ?? 'KYRO',
     area: run.area ?? location.area ?? location.name ?? run.route_name ?? run.place_display_label ?? run.place_region_label ?? run.city ?? 'Route',
     timeSlot: parseTimeSlot(run),
-    tag: run.tag ?? run.vibe ?? run.type ?? 'read-only API run',
+    tag: run.tag ?? run.vibe ?? run.type ?? '읽기 전용 API 러닝',
     note: run.note ?? run.description ?? run.memo ?? 'KYRO API에서 불러온 실제 러닝 데이터',
     calories: parseNumber(run.calories),
     elevationGainM: parseNumber(run.elevation_gain_m ?? run.elevationGainM),
@@ -118,8 +140,9 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [selectedRunId, setSelectedRunId] = useState('');
   const [cardIndex, setCardIndex] = useState(0);
-  const [intent, setIntent] = useState('Run Together');
-  const [lastSkipped, setLastSkipped] = useState(null);
+  const [decision, setDecision] = useState({ intent: ACTIONS.runTogether, friend: null });
+  const [actionMessage, setActionMessage] = useState('오른쪽으로 밀면 같이 뛰기');
+  const [drag, setDrag] = useState({ active: false, startX: 0, startY: 0, x: 0, y: 0 });
 
   useEffect(() => {
     let cancelled = false;
@@ -146,6 +169,7 @@ export default function App() {
   const nextFriend = runs.friendRuns.length ? runs.friendRuns[(cardIndex + 1) % runs.friendRuns.length] : null;
   const selectedRunWithDetail = selectedRun ? details[selectedRun.id] ?? selectedRun : null;
   const activeFriendWithDetail = activeFriend ? details[activeFriend.id] ?? activeFriend : null;
+  const resultFriend = decision.friend ? details[decision.friend.id] ?? decision.friend : activeFriendWithDetail;
 
   useEffect(() => {
     const targets = [selectedRun, activeFriend].filter((run) => run && !details[run.id]);
@@ -173,54 +197,82 @@ export default function App() {
   }, [activeFriend, details, selectedRun]);
 
   const match = useMemo(
-    () => (selectedRunWithDetail && activeFriendWithDetail ? calculateBuddyMatch(selectedRunWithDetail, activeFriendWithDetail, intent) : null),
-    [activeFriendWithDetail, intent, selectedRunWithDetail],
+    () => (selectedRunWithDetail && resultFriend ? calculateBuddyMatch(selectedRunWithDetail, resultFriend, decision.intent) : null),
+    [decision.intent, resultFriend, selectedRunWithDetail],
   );
 
   function choose(nextIntent) {
     if (!activeFriend) return;
-    setIntent(nextIntent);
-    if (nextIntent === 'Not My Pace') {
-      setLastSkipped(activeFriend.name);
-      setCardIndex((index) => index + 1);
-      return;
+
+    const chosenFriend = activeFriendWithDetail ?? activeFriend;
+    setDrag({ active: false, startX: 0, startY: 0, x: 0, y: 0 });
+
+    if (nextIntent === ACTIONS.pass) {
+      setActionMessage(`${chosenFriend.name} 패스 완료`);
+    } else {
+      setDecision({ intent: nextIntent, friend: chosenFriend });
+      setActionMessage(nextIntent === ACTIONS.rival ? `${chosenFriend.name} 라이벌 찜` : `${chosenFriend.name} 매칭 찜`);
     }
-    setLastSkipped(null);
+
+    setCardIndex((index) => index + 1);
+  }
+
+  function beginSwipe(event) {
+    if (!activeFriend) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDrag({ active: true, startX: event.clientX, startY: event.clientY, x: 0, y: 0 });
+  }
+
+  function moveSwipe(event) {
+    if (!drag.active) return;
+    setDrag((current) => ({
+      ...current,
+      x: event.clientX - current.startX,
+      y: event.clientY - current.startY,
+    }));
+  }
+
+  function endSwipe() {
+    if (!drag.active) return;
+    const { x, y } = drag;
+    setDrag({ active: false, startX: 0, startY: 0, x: 0, y: 0 });
+    if (x > 92) choose(ACTIONS.runTogether);
+    else if (x < -92) choose(ACTIONS.pass);
+    else if (y < -92) choose(ACTIONS.rival);
   }
 
   const isReady = status === 'live' && selectedRunWithDetail && activeFriendWithDetail && match;
+  const canChoose = Boolean(activeFriend);
 
   return (
     <main className="app-shell">
-      <section className="hero panel">
+      <section className="hero">
         <div>
           <p className="eyebrow">KYRO Mate</p>
-          <h1>Find Your KYRO Mate</h1>
-          <p className="hero-copy">
-            KYRO가 러닝을 영토 게임으로 만들었다면, KYRO Mate는 같이 뛸 파티원을 바로 매칭합니다.
-          </p>
+          <h1>내 페이스에 반할 시간.</h1>
+          <p className="hero-copy">오늘 같이 뛸 사람, 한 장의 카드로 끝.</p>
         </div>
-        <div className={`status ${status}`}>
-          {status === 'live' ? 'LIVE API' : status === 'loading' ? 'SYNCING' : 'API ERROR'}
+        <Mascot />
+          <div className={`status ${status}`}>
+          {status === 'live' ? '연결됨' : status === 'loading' ? '동기화' : '오류'}
         </div>
       </section>
 
       {!isReady && (
         <section className="panel api-state">
-          <p className="eyebrow">Real API Only</p>
+          <p className="eyebrow">실제 API 연결</p>
           <h2>{status === 'loading' ? 'KYRO API에서 실제 러닝 데이터를 불러오는 중' : 'KYRO API 연결이 필요합니다'}</h2>
           <p>
             {status === 'loading'
-              ? 'mock 유저 없이 KYRO read-only API 응답만 기다립니다.'
+              ? '샘플 유저 없이 KYRO 읽기 전용 API 응답만 기다립니다.'
               : `${errorMessage || 'API 응답 실패'} · Vercel env의 KYRO_API_KEY와 KYRO_API_BASE_URL을 확인하세요.`}
           </p>
         </section>
       )}
 
-      <section className={isReady ? 'grid' : 'grid disabled'}>
-        <aside className="panel run-picker">
-          <p className="eyebrow">Step 1</p>
-          <h2>내 러닝 선택</h2>
+      <section className={isReady ? 'date-layout' : 'date-layout disabled'}>
+        <aside className="run-dock glass-card">
+          <p className="eyebrow">내 러닝</p>
           <div className="run-list">
             {runs.myRuns.map((run) => (
               <button
@@ -233,41 +285,49 @@ export default function App() {
               </button>
             ))}
           </div>
-          {selectedRunWithDetail && <RunDetail run={selectedRunWithDetail} label="Selected detail" />}
-          <div className="mini-note">
-            실제 KYRO API 데이터만 사용 · 상세 {detailStatus === 'loading' ? '동기화 중' : detailStatus === 'live' ? '반영됨' : '대기'}
-          </div>
+          {selectedRunWithDetail && <RunDetail run={selectedRunWithDetail} label="선택한 러닝 상세" compact />}
         </aside>
 
-        <section className="panel card-zone">
-          <p className="eyebrow">Step 2</p>
-          <h2>친구 러닝 카드</h2>
-          <div className="card-stack">
-            {nextFriend && <FriendCard friend={nextFriend} ghost />}
-            {activeFriendWithDetail && <FriendCard friend={activeFriendWithDetail} />}
+        <section className="phone-stage">
+          <div className="phone-shell">
+            <div className="phone-topbar">
+              <span>KYRO Mate</span>
+              <small>{detailStatus === 'loading' ? '궁합 계산 중' : actionMessage}</small>
+            </div>
+            <div className="card-stack">
+              {nextFriend && <FriendCard friend={nextFriend} ghost />}
+              {activeFriendWithDetail && (
+                <FriendCard
+                  friend={activeFriendWithDetail}
+                  drag={drag}
+                  onPointerDown={beginSwipe}
+                  onPointerMove={moveSwipe}
+                  onPointerUp={endSwipe}
+                  onPointerCancel={endSwipe}
+                />
+              )}
+            </div>
+            <div className="actions">
+              <button className="pass" onClick={() => choose(ACTIONS.pass)} disabled={!canChoose}>패스</button>
+              <button className="spark" onClick={() => choose(ACTIONS.rival)} disabled={!canChoose}>라이벌</button>
+              <button className="primary" onClick={() => choose(ACTIONS.runTogether)} disabled={!canChoose}>같이 뛰기</button>
+            </div>
+            <p className="skip-copy">{actionMessage}</p>
           </div>
-          <div className="actions">
-            <button onClick={() => choose('Not My Pace')}>Not My Pace</button>
-            <button onClick={() => choose('Rival Buddy')}>Rival Buddy</button>
-            <button className="primary" onClick={() => choose('Run Together')}>Run Together</button>
-          </div>
-          {lastSkipped && <p className="skip-copy">{lastSkipped} 카드는 넘겼고, 다음 후보를 계산 중입니다.</p>}
         </section>
 
-        <section className="panel result-card">
-          <p className="eyebrow">Step 3</p>
+        <section className="match-card glass-card">
+          <p className="eyebrow">궁합</p>
           <div className="score-row">
-            <span>{match?.type ?? 'Waiting API'}</span>
+              <span>{match ? matchTypeLabels[match.type] ?? match.type : 'API 대기 중'}</span>
             <strong>{match?.score ?? '--'}%</strong>
           </div>
           <h2>{match?.headline ?? '실제 러닝 데이터가 오면 바로 계산합니다.'}</h2>
-          <p>추천 러닝: {match?.recommendation ?? '--'}</p>
-          <p>주의: {match?.warning ?? '--'}</p>
-          {activeFriendWithDetail && <RunDetail run={activeFriendWithDetail} label="Friend detail" />}
+          <p className="recommendation">{match?.recommendation ?? '--'}</p>
           <div className="score-bars">
             {Object.entries(match?.parts ?? {}).map(([key, value]) => (
               <div key={key}>
-                <span>{key}</span>
+                <span>{scorePartLabels[key] ?? key}</span>
                 <meter min="0" max={key === 'pace' ? 35 : key === 'distance' ? 25 : key === 'vibe' ? 10 : 15} value={value} />
               </div>
             ))}
@@ -278,23 +338,51 @@ export default function App() {
   );
 }
 
-function RunDetail({ run, label }) {
+function Mascot() {
   return (
-    <div className="detail-strip" aria-label={label}>
-      <span>{run.splitsCount || '--'} splits</span>
-      <span>{run.trackPointCount || '--'} GPS pts</span>
-      <span>{Number.isFinite(run.elevationGainM) ? `+${Math.round(run.elevationGainM)}m` : '-- elev'}</span>
-      <span>{Number.isFinite(run.territoryGainM2) ? `${Math.round(run.territoryGainM2)}m²` : '-- territory'}</span>
+    <div className="mascot" aria-label="KYRO Mate 마스코트">
+      <div className="mascot-ear left" />
+      <div className="mascot-ear right" />
+      <div className="mascot-face">
+        <span className="mascot-eye left" />
+        <span className="mascot-eye right" />
+        <span className="mascot-blush left" />
+        <span className="mascot-blush right" />
+        <span className="mascot-mouth" />
+      </div>
+      <div className="mascot-heart" />
     </div>
   );
 }
 
-function FriendCard({ friend, ghost = false }) {
+function RunDetail({ run, label, compact = false }) {
   return (
-    <article className={ghost ? 'friend-card ghost' : 'friend-card'}>
+    <div className={compact ? 'detail-strip compact' : 'detail-strip'} aria-label={label}>
+      <span>{run.splitsCount || '--'} 구간</span>
+      <span>{run.trackPointCount || '--'} GPS 포인트</span>
+      <span>{Number.isFinite(run.elevationGainM) ? `+${Math.round(run.elevationGainM)}m` : '-- 고도'}</span>
+      <span>{Number.isFinite(run.territoryGainM2) ? `${Math.round(run.territoryGainM2)}m²` : '-- 영역'}</span>
+    </div>
+  );
+}
+
+function FriendCard({ friend, ghost = false, drag, ...handlers }) {
+  const swipeStyle = drag?.active
+    ? { transform: `translate(${drag.x}px, ${drag.y * 0.28}px) rotate(${drag.x / 18}deg)` }
+    : undefined;
+
+  return (
+    <article className={ghost ? 'friend-card ghost' : 'friend-card'} style={swipeStyle} {...handlers}>
+      {!ghost && (
+        <>
+          <span className="swipe-stamp like" style={{ opacity: Math.min(Math.max((drag?.x ?? 0) / 90, 0), 1) }}>좋아요</span>
+          <span className="swipe-stamp nope" style={{ opacity: Math.min(Math.max(-(drag?.x ?? 0) / 90, 0), 1) }}>패스</span>
+          <span className="swipe-stamp rival" style={{ opacity: Math.min(Math.max(-(drag?.y ?? 0) / 90, 0), 1) }}>라이벌</span>
+        </>
+      )}
       <div className="card-topline">
         <span>{friend.name}</span>
-        <small>{friend.tag}</small>
+        <small>{friend.timeSlot ?? '시간대 준비중'}</small>
       </div>
       <h3>{friend.title}</h3>
       <div className="stats">
@@ -302,7 +390,6 @@ function FriendCard({ friend, ghost = false }) {
         <strong>{formatPace(friend.paceSecPerKm)}</strong>
         <strong>{friend.area}</strong>
       </div>
-      <RunDetail run={friend} label={`${friend.name} detail`} />
       <p>{friend.note}</p>
     </article>
   );
