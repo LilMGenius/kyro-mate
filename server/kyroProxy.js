@@ -1,14 +1,8 @@
 const defaultBaseUrl = 'https://kyro-hackathon.vercel.app';
 
-function getPathParts(path) {
-  if (Array.isArray(path)) return path;
-  if (typeof path === 'string') return [path];
-  return [];
-}
-
-function appendQuery(url, query) {
+function appendQuery(url, query, ignoredKeys = []) {
   Object.entries(query).forEach(([key, value]) => {
-    if (key === 'path') return;
+    if (ignoredKeys.includes(key)) return;
     const values = Array.isArray(value) ? value : [value];
     values.forEach((item) => {
       if (item !== undefined) url.searchParams.append(key, item);
@@ -16,7 +10,7 @@ function appendQuery(url, query) {
   });
 }
 
-export default async function handler(request, response) {
+export async function proxyKyro(request, response, pathParts, ignoredQueryKeys = []) {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     response.status(405).json({ error: 'KYRO Mate proxy is read-only' });
     return;
@@ -29,9 +23,9 @@ export default async function handler(request, response) {
   }
 
   const baseUrl = process.env.KYRO_API_BASE_URL || defaultBaseUrl;
-  const path = getPathParts(request.query.path).map(encodeURIComponent).join('/');
+  const path = pathParts.map(encodeURIComponent).join('/');
   const upstreamUrl = new URL(`/api/v1/${path}`, baseUrl);
-  appendQuery(upstreamUrl, request.query);
+  appendQuery(upstreamUrl, request.query, ignoredQueryKeys);
 
   try {
     const upstreamResponse = await fetch(upstreamUrl, {
